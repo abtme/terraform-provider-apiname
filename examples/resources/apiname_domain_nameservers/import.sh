@@ -1,0 +1,1 @@
+terraform import apiname_domain_nameservers.example abt.me
