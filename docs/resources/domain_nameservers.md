@@ -29,7 +29,7 @@ resource "apiname_domain_nameservers" "example" {
 ### Required
 
 - `domain_name` (String) The domain name to manage, e.g. "abt.me".
-- `nameservers` (List of String) List of nameservers to assign to the domain.
+- `nameservers` (Set of String) Set of nameservers to assign to the domain. Order does not matter.
 
 ### Read-Only
 

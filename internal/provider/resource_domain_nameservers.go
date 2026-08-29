@@ -24,7 +24,7 @@ type DomainNameserversResource struct {
 type DomainNameserversModel struct {
 	ID          types.String `tfsdk:"id"`
 	DomainName  types.String `tfsdk:"domain_name"`
-	Nameservers types.List   `tfsdk:"nameservers"`
+	Nameservers types.Set    `tfsdk:"nameservers"`
 }
 
 func NewDomainNameserversResource() resource.Resource {
@@ -54,10 +54,18 @@ func (r *DomainNameserversResource) Schema(_ context.Context, _ resource.SchemaR
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"nameservers": schema.ListAttribute{
+			"nameservers": schema.SetAttribute{
 				Required:    true,
 				ElementType: types.StringType,
-				Description: "List of nameservers to assign to the domain.",
+				// A Set, not a List - DomainNameAPI's registrar API doesn't
+				// preserve submitted order on read-back (observed returning
+				// nameservers in a different, but internally consistent,
+				// order than whatever was sent). Nameserver order has no
+				// DNS-functional meaning, so modeling this as an
+				// order-sensitive List caused a permanent phantom diff on
+				// every plan even when the actual nameserver set was
+				// unchanged.
+				Description: "Set of nameservers to assign to the domain. Order does not matter.",
 			},
 		},
 	}
@@ -112,13 +120,13 @@ func (r *DomainNameserversResource) Read(ctx context.Context, req resource.ReadR
 		return
 	}
 
-	nsList, diags := types.ListValueFrom(ctx, types.StringType, ns)
+	nsSet, diags := types.SetValueFrom(ctx, types.StringType, ns)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	state.Nameservers = nsList
+	state.Nameservers = nsSet
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -160,7 +168,7 @@ func (r *DomainNameserversResource) ImportState(ctx context.Context, req resourc
 		return
 	}
 
-	nsList, diags := types.ListValueFrom(ctx, types.StringType, ns)
+	nsSet, diags := types.SetValueFrom(ctx, types.StringType, ns)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -169,14 +177,14 @@ func (r *DomainNameserversResource) ImportState(ctx context.Context, req resourc
 	state := DomainNameserversModel{
 		ID:          types.StringValue(domain),
 		DomainName:  types.StringValue(domain),
-		Nameservers: nsList,
+		Nameservers: nsSet,
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func toStringSlice(ctx context.Context, list types.List) ([]string, diag.Diagnostics) {
+func toStringSlice(ctx context.Context, set types.Set) ([]string, diag.Diagnostics) {
 	var elems []types.String
-	diags := list.ElementsAs(ctx, &elems, false)
+	diags := set.ElementsAs(ctx, &elems, false)
 	if diags.HasError() {
 		return nil, diags
 	}
