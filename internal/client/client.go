@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -48,6 +49,20 @@ type errorResponse struct {
 	} `json:"error"`
 }
 
+// debugHTTP reports whether APINAME_DEBUG_HTTP is set, enabling verbose
+// request/response logging to stderr. The API key lives only in a header
+// here (never logged), but body/URL are redacted too as defense-in-depth.
+func debugHTTP() bool {
+	return os.Getenv("APINAME_DEBUG_HTTP") != ""
+}
+
+func (c *Client) redact(s string) string {
+	if c.APIKey != "" {
+		s = strings.ReplaceAll(s, c.APIKey, "[redacted]")
+	}
+	return s
+}
+
 // request performs an HTTP call against the DomainNameAPI REST gateway and
 // decodes a successful JSON response into target (if non-nil).
 func (c *Client) request(method, endpoint string, query url.Values, body interface{}, target interface{}) error {
@@ -57,12 +72,17 @@ func (c *Client) request(method, endpoint string, query url.Values, body interfa
 	}
 
 	var bodyReader io.Reader
+	var bodyForLog string
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return fmt.Errorf("encoding request body: %w", err)
 		}
 		bodyReader = bytes.NewReader(b)
+		bodyForLog = string(b)
+	}
+	if debugHTTP() {
+		fmt.Fprintf(os.Stderr, "APINAME_DEBUG_HTTP: %s %s body=%q\n", method, c.redact(reqURL), c.redact(bodyForLog))
 	}
 
 	req, err := http.NewRequest(method, reqURL, bodyReader)
@@ -76,13 +96,22 @@ func (c *Client) request(method, endpoint string, query url.Values, body interfa
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
+		if debugHTTP() {
+			fmt.Fprintf(os.Stderr, "APINAME_DEBUG_HTTP: request failed: %v\n", err)
+		}
 		return fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if debugHTTP() {
+		fmt.Fprintf(os.Stderr, "APINAME_DEBUG_HTTP: response status=%s\n", resp.Status)
+	}
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("reading response: %w", err)
+	}
+	if debugHTTP() {
+		fmt.Fprintf(os.Stderr, "APINAME_DEBUG_HTTP: response body=%q\n", c.redact(string(respBody)))
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
